@@ -8,11 +8,24 @@
       "inspectorId": 2,
       "deadline": "2024-12-31T15:59:59.000Z",
       "cycle": "monthly",
-      "status": "pending",
+      "status": "overdue",
       "id": 1,
       "createdAt": "2026-06-09T19:01:30.760Z",
-      "updatedAt": "2026-06-09T19:01:30.761Z"
+      "updatedAt": "2026-06-09T19:21:56.595Z"
+    },
+    {
+      "taskNo": "IT202606101531",
+      "title": "月度设备巡检",
+      "description": "对所有电子设备进行常规检查",
+      "assetId": 2,
+      "inspectorId": 2,
+      "deadline": "2024-12-31T15:59:59.000Z",
+      "cycle": "once",
+      "status": "overdue",
+      "id": 2,
+      "createdAt": "2026-06-09T19:21:56.584Z",
+      "updatedAt": "2026-06-09T19:21:56.596Z"
     }
   ],
-  "nextId": 2
+  "nextId": 3
 }

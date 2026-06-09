@@ -3,12 +3,41 @@ import { AppDataSource, In } from "../db/Database";
 import { InspectionTask, TaskStatus, TaskCycle } from "../entities/InspectionTask";
 import { Asset } from "../entities/Asset";
 import { User } from "../entities/User";
+import { ExceptionReport } from "../entities/ExceptionReport";
 import { success, paginate, error } from "../utils/response";
 import moment from "moment";
 
 const taskRepository = AppDataSource.getRepository<InspectionTask>("InspectionTask");
 const assetRepository = AppDataSource.getRepository<Asset>("Asset");
 const userRepository = AppDataSource.getRepository<User>("User");
+const exceptionRepository = AppDataSource.getRepository<ExceptionReport>("ExceptionReport");
+
+async function loadTaskRelations(tasks: InspectionTask[]): Promise<any[]> {
+  const assetIds = [...new Set(tasks.map((t) => t.assetId))];
+  const inspectorIds = [...new Set(tasks.map((t) => t.inspectorId))];
+  const taskIds = tasks.map((t) => t.id);
+
+  const assets = await assetRepository.find({ where: { id: In(assetIds) } });
+  const inspectors = await userRepository.find({ where: { id: In(inspectorIds) } });
+  const exceptions = await exceptionRepository.find({ where: { taskId: In(taskIds) } });
+
+  const assetMap = new Map(assets.map((a) => [a.id, a]));
+  const inspectorMap = new Map(inspectors.map((u) => [u.id, u]));
+  const exceptionMap = new Map<number, ExceptionReport[]>();
+  for (const exp of exceptions) {
+    if (!exceptionMap.has(exp.taskId)) {
+      exceptionMap.set(exp.taskId, []);
+    }
+    exceptionMap.get(exp.taskId)!.push(exp);
+  }
+
+  return tasks.map((task) => ({
+    ...task,
+    asset: assetMap.get(task.assetId),
+    inspector: inspectorMap.get(task.inspectorId),
+    exceptions: exceptionMap.get(task.id) || [],
+  }));
+}
 
 function generateTaskNo(): string {
   const date = moment().format("YYYYMMDD");
@@ -73,7 +102,7 @@ export async function createInspectionTask(req: Request, res: Response) {
 }
 
 export async function getInspectionTaskList(req: Request, res: Response) {
-  const { page = 1, pageSize = 10, status, inspectorId, assetCode, startDate, endDate } = req.query as any;
+  const { page = 1, pageSize = 10, status, inspectorId, assetCode, startDate, endDate, hasException } = req.query as any;
 
   const where: any = {};
   if (status) {
@@ -85,16 +114,12 @@ export async function getInspectionTaskList(req: Request, res: Response) {
 
   const [tasks, total] = await taskRepository.findAndCount({
     where,
-    relations: ["asset", "inspector"],
     skip: (page - 1) * pageSize,
     take: pageSize,
     order: { createdAt: "DESC" },
   });
 
-  const filteredTasks = tasks.filter((task) => {
-    if (assetCode && !task.asset.assetCode.includes(assetCode)) {
-      return false;
-    }
+  let filteredTasks = tasks.filter((task) => {
     if (startDate && moment(task.createdAt).isBefore(startDate)) {
       return false;
     }
@@ -104,9 +129,29 @@ export async function getInspectionTaskList(req: Request, res: Response) {
     return true;
   });
 
+  let tasksWithRelations = await loadTaskRelations(filteredTasks);
+
+  tasksWithRelations = tasksWithRelations.filter((task) => {
+    if (assetCode && !task.asset?.assetCode.includes(assetCode)) {
+      return false;
+    }
+    if (hasException !== undefined) {
+      const hasExp = task.exceptions && task.exceptions.length > 0;
+      if (hasException === "true" && !hasExp) return false;
+      if (hasException === "false" && hasExp) return false;
+    }
+    return true;
+  });
+
+  tasksWithRelations = tasksWithRelations.map((task) => ({
+    ...task,
+    hasException: !!(task.exceptions && task.exceptions.length > 0),
+    exceptionCount: task.exceptions?.length || 0,
+  })) as any[];
+
   await updateOverdueTasks();
 
-  paginate(res, filteredTasks, total, page, pageSize, "查询成功");
+  paginate(res, tasksWithRelations, total, page, pageSize, "查询成功");
 }
 
 export async function getMyTasks(req: Request, res: Response) {
@@ -114,7 +159,7 @@ export async function getMyTasks(req: Request, res: Response) {
     return error(res, "未登录", 401);
   }
 
-  const { page = 1, pageSize = 10, status } = req.query as any;
+  const { page = 1, pageSize = 10, status, hasException } = req.query as any;
 
   const where: any = { inspectorId: req.user.userId };
   if (status) {
@@ -125,13 +170,29 @@ export async function getMyTasks(req: Request, res: Response) {
 
   const [tasks, total] = await taskRepository.findAndCount({
     where,
-    relations: ["asset"],
     skip: (page - 1) * pageSize,
     take: pageSize,
     order: { deadline: "ASC" },
   });
 
-  paginate(res, tasks, total, page, pageSize, "查询成功");
+  let tasksWithRelations = await loadTaskRelations(tasks);
+
+  if (hasException !== undefined) {
+    tasksWithRelations = tasksWithRelations.filter((task) => {
+      const hasExp = task.exceptions && task.exceptions.length > 0;
+      if (hasException === "true" && !hasExp) return false;
+      if (hasException === "false" && hasExp) return false;
+      return true;
+    });
+  }
+
+  tasksWithRelations = tasksWithRelations.map((task) => ({
+    ...task,
+    hasException: !!(task.exceptions && task.exceptions.length > 0),
+    exceptionCount: task.exceptions?.length || 0,
+  })) as any[];
+
+  paginate(res, tasksWithRelations, total, page, pageSize, "查询成功");
 }
 
 export async function getInspectionTaskDetail(req: Request, res: Response) {
@@ -139,14 +200,22 @@ export async function getInspectionTaskDetail(req: Request, res: Response) {
 
   const task = await taskRepository.findOne({
     where: { id: Number(id) },
-    relations: ["asset", "inspector", "exceptionReports"],
   });
 
   if (!task) {
     return error(res, "任务不存在", 404);
   }
 
-  success(res, task, "查询成功");
+  const [taskWithRelations] = await loadTaskRelations([task]);
+
+  const exceptions = taskWithRelations.exceptions || [];
+
+  success(res, {
+    ...taskWithRelations,
+    hasException: exceptions.length > 0,
+    exceptionCount: exceptions.length,
+    exceptions,
+  }, "查询成功");
 }
 
 export async function updateInspectionTask(req: Request, res: Response) {
@@ -269,4 +338,53 @@ export async function getTaskStatistics(req: Request, res: Response) {
   };
 
   success(res, stats);
+}
+
+export async function getAssetInspectionHistory(req: Request, res: Response) {
+  const { assetCode } = req.params;
+
+  const asset = await assetRepository.findOne({ where: { assetCode } });
+  if (!asset) {
+    return error(res, "资产不存在", 404);
+  }
+
+  const tasks = await taskRepository.find({
+    where: { assetId: asset.id },
+    order: { createdAt: "DESC" },
+  });
+
+  const exceptions = await exceptionRepository.find({
+    where: { assetId: asset.id },
+    order: { createdAt: "DESC" },
+  });
+
+  const tasksWithRelations = await loadTaskRelations(tasks);
+
+  const inspectorIds = [...new Set(exceptions.map((e) => e.reporterId).concat(exceptions.map((e) => e.handlerId)).filter(Boolean))];
+  const users = await userRepository.find({ where: { id: In(inspectorIds) } });
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
+  const exceptionsWithRelations = exceptions.map((exp) => ({
+    ...exp,
+    reporter: userMap.get(exp.reporterId),
+    handler: exp.handlerId ? userMap.get(exp.handlerId) : undefined,
+  }));
+
+  const history = [
+    ...tasksWithRelations.map((t) => ({
+      ...t,
+      type: "inspection" as const,
+    })),
+    ...exceptionsWithRelations.map((e) => ({
+      ...e,
+      type: "exception" as const,
+    })),
+  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  success(res, {
+    asset,
+    totalInspections: tasks.length,
+    totalExceptions: exceptions.length,
+    history,
+  }, "查询成功");
 }

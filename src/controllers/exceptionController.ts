@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { AppDataSource } from "../db/Database";
+import { AppDataSource, In } from "../db/Database";
 import { ExceptionReport, ExceptionStatus, ExceptionType } from "../entities/ExceptionReport";
 import { Asset, AssetStatus } from "../entities/Asset";
 import { ProcessFlow, FlowAction } from "../entities/ProcessFlow";
@@ -128,7 +128,11 @@ export async function reportException(req: Request, res: Response) {
 }
 
 export async function getExceptionList(req: Request, res: Response) {
-  const { page = 1, pageSize = 10, status, exceptionType, department, startDate, endDate, assetCode } = req.query as any;
+  const { page = 1, pageSize = 10, status, exceptionType, department, startDate, endDate, assetCode, handlerId, handlerType } = req.query as any;
+
+  if (!req.user) {
+    return error(res, "未登录", 401);
+  }
 
   const where: any = {};
   if (status) {
@@ -137,18 +141,40 @@ export async function getExceptionList(req: Request, res: Response) {
   if (exceptionType) {
     where.exceptionType = exceptionType;
   }
+  if (handlerId) {
+    where.handlerId = Number(handlerId);
+  }
 
   const allReports = await reportRepository.find({
     where,
-    relations: ["asset", "reporter", "handler"],
     order: { createdAt: "DESC" },
   });
 
-  const filteredReports = allReports.filter((report) => {
-    if (department && report.asset?.department !== department) {
+  const assetIds = [...new Set(allReports.map((r) => r.assetId))];
+  const userIds = [...new Set(allReports.map((r) => r.reporterId).concat(allReports.map((r) => r.handlerId)).filter(Boolean))];
+
+  const assets = await assetRepository.find({ where: { id: In(assetIds) } });
+  const users = await userRepository.find({ where: { id: In(userIds) } });
+
+  const assetMap = new Map(assets.map((a) => [a.id, a]));
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
+  const isAdmin = req.user.role === "admin";
+  const userId = req.user.userId;
+
+  let filteredReports = allReports.filter((report) => {
+    if (!isAdmin) {
+      if (report.status === "pending") {
+      } else if (report.handlerId !== userId) {
+        return false;
+      }
+    }
+
+    const asset = assetMap.get(report.assetId);
+    if (department && asset?.department !== department) {
       return false;
     }
-    if (assetCode && !report.asset?.assetCode.includes(assetCode)) {
+    if (assetCode && !asset?.assetCode.includes(assetCode)) {
       return false;
     }
     if (startDate && new Date(report.createdAt) < new Date(startDate)) {
@@ -157,13 +183,28 @@ export async function getExceptionList(req: Request, res: Response) {
     if (endDate && new Date(report.createdAt) > new Date(endDate)) {
       return false;
     }
+    if (handlerType) {
+      if (handlerType === "maintenance" && report.handlerId) {
+        const handler = userMap.get(report.handlerId);
+        if (handler?.role !== "maintenance") return false;
+      } else if (handlerType === "admin_staff" && report.handlerId) {
+        const handler = userMap.get(report.handlerId);
+        if (handler?.role !== "admin_staff") return false;
+      }
+    }
     return true;
   });
 
-  const total = filteredReports.length;
-  const list = filteredReports.slice((page - 1) * pageSize, page * pageSize);
+  const listWithRelations = filteredReports.slice((page - 1) * pageSize, page * pageSize).map((report) => ({
+    ...report,
+    asset: assetMap.get(report.assetId),
+    reporter: userMap.get(report.reporterId),
+    handler: report.handlerId ? userMap.get(report.handlerId) : undefined,
+  }));
 
-  paginate(res, list, total, page, pageSize, "查询成功");
+  const total = filteredReports.length;
+
+  paginate(res, listWithRelations, total, page, pageSize, "查询成功");
 }
 
 export async function getMyReportedExceptions(req: Request, res: Response) {
@@ -232,26 +273,60 @@ export async function getTodoList(req: Request, res: Response) {
     return error(res, "未登录", 401);
   }
 
-  const { page = 1, pageSize = 10 } = req.query as any;
+  const { page = 1, pageSize = 10, status, department, startDate, endDate } = req.query as any;
   const userId = req.user.userId;
+  const isAdmin = req.user.role === "admin";
+
+  const where: any = {};
+  if (status && isAdmin) {
+    where.status = status;
+  }
 
   const allReports = await reportRepository.find({
-    relations: ["asset", "reporter", "handler"],
+    where,
     order: { createdAt: "DESC" },
   });
 
-  const filteredReports = allReports.filter((report) => {
-    if (report.status === "pending") {
-      return true;
+  const assetIds = [...new Set(allReports.map((r) => r.assetId))];
+  const userIds = [...new Set(allReports.map((r) => r.reporterId).concat(allReports.map((r) => r.handlerId)).filter(Boolean))];
+
+  const assets = await assetRepository.find({ where: { id: In(assetIds) } });
+  const users = await userRepository.find({ where: { id: In(userIds) } });
+
+  const assetMap = new Map(assets.map((a) => [a.id, a]));
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
+  let filteredReports = allReports.filter((report) => {
+    if (isAdmin) {
+      if (department) {
+        const asset = assetMap.get(report.assetId);
+        if (asset?.department !== department) return false;
+      }
+    } else {
+      if (report.status === "pending") {
+        return false;
+      }
+      if ((report.status === "assigned" || report.status === "processing") && report.handlerId !== userId) {
+        return false;
+      }
     }
-    if ((report.status === "assigned" || report.status === "processing") && report.handlerId === userId) {
-      return true;
+
+    if (startDate && new Date(report.createdAt) < new Date(startDate)) {
+      return false;
     }
-    return false;
+    if (endDate && new Date(report.createdAt) > new Date(endDate)) {
+      return false;
+    }
+    return true;
   });
 
   const total = filteredReports.length;
-  const list = filteredReports.slice((page - 1) * pageSize, page * pageSize);
+  const list = filteredReports.slice((page - 1) * pageSize, page * pageSize).map((report) => ({
+    ...report,
+    asset: assetMap.get(report.assetId),
+    reporter: userMap.get(report.reporterId),
+    handler: report.handlerId ? userMap.get(report.handlerId) : undefined,
+  }));
 
   paginate(res, list, total, page, pageSize, "查询成功");
 }

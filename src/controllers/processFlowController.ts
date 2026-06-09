@@ -388,9 +388,85 @@ export async function getHandlerList(req: Request, res: Response) {
 
   const users = await userRepository.find({
     where,
-    select: ["id", "name", "role", "department", "phone"],
     order: { name: "ASC" },
   });
 
-  success(res, users);
+  const safeUsers = users.map((user) => ({
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    department: user.department,
+    phone: user.phone,
+  }));
+
+  success(res, safeUsers);
+}
+
+export async function batchAssignExceptions(req: Request, res: Response) {
+  if (!req.user) {
+    return error(res, "未登录", 401);
+  }
+
+  if (req.user.role !== "admin") {
+    return error(res, "只有管理员才能批量分配", 403);
+  }
+
+  const { exceptionIds, handlerId, handlerType, remark } = req.body;
+  const operatorId = req.user.userId;
+
+  if (!Array.isArray(exceptionIds) || exceptionIds.length === 0) {
+    return error(res, "请选择要分配的异常", 400);
+  }
+
+  const handler = await userRepository.findOne({ where: { id: handlerId } });
+  if (!handler) {
+    return error(res, "处理人不存在", 404);
+  }
+
+  const reports = await reportRepository.find({
+    where: { id: In(exceptionIds) },
+  });
+
+  if (reports.length !== exceptionIds.length) {
+    const foundIds = reports.map((r) => r.id);
+    const missingIds = exceptionIds.filter((id: number) => !foundIds.includes(id));
+    return error(res, `以下异常不存在: ${missingIds.join(", ")}`, 404);
+  }
+
+  const invalidReports = reports.filter((r) => r.status === "resolved" || r.status === "closed");
+  if (invalidReports.length > 0) {
+    const invalidNos = invalidReports.map((r) => r.reportNo);
+    return error(res, `以下异常已处理完成，无法分配: ${invalidNos.join(", ")}`, 400);
+  }
+
+  await AppDataSource.transaction(async () => {
+    for (const report of reports) {
+      const previousStatus = report.status;
+      const newStatus = "assigned" as ExceptionStatus;
+
+      report.handlerId = handlerId;
+      report.handlerType = handlerType as HandlerType;
+      report.status = newStatus;
+      await reportRepository.save(report);
+
+      await addProcessFlow(
+        report.id,
+        operatorId,
+        "assign",
+        remark || `批量分配给 ${handler.name} 处理`,
+        undefined,
+        handlerId,
+        previousStatus,
+        newStatus
+      );
+    }
+  });
+
+  success(res, {
+    count: reports.length,
+    handler: {
+      id: handler.id,
+      name: handler.name,
+    },
+  }, `批量分配成功，共 ${reports.length} 条异常`);
 }

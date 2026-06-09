@@ -9,7 +9,41 @@
       "id": 1,
       "createdAt": "2026-06-09T19:01:30.766Z",
       "updatedAt": "2026-06-09T19:01:30.767Z"
+    },
+    {
+      "exceptionReportId": 2,
+      "operatorId": 1,
+      "action": "create",
+      "remark": "上报异常: 电脑开机蓝屏，无法正常启动",
+      "newStatus": "pending",
+      "id": 2,
+      "createdAt": "2026-06-09T19:21:56.589Z",
+      "updatedAt": "2026-06-09T19:21:56.589Z"
+    },
+    {
+      "exceptionReportId": 1,
+      "operatorId": 1,
+      "action": "assign",
+      "remark": "批量分配给维修组处理",
+      "toUserId": 4,
+      "previousStatus": "pending",
+      "newStatus": "assigned",
+      "id": 3,
+      "createdAt": "2026-06-09T19:21:56.613Z",
+      "updatedAt": "2026-06-09T19:21:56.613Z"
+    },
+    {
+      "exceptionReportId": 2,
+      "operatorId": 1,
+      "action": "assign",
+      "remark": "批量分配给维修组处理",
+      "toUserId": 4,
+      "previousStatus": "pending",
+      "newStatus": "assigned",
+      "id": 4,
+      "createdAt": "2026-06-09T19:21:56.613Z",
+      "updatedAt": "2026-06-09T19:21:56.613Z"
     }
   ],
-  "nextId": 2
+  "nextId": 5
 }

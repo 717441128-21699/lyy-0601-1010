@@ -485,3 +485,150 @@ function getExceptionTypeLabel(type: ExceptionType): string {
   };
   return labels[type] || type;
 }
+
+export async function getExceptionClosureBoard(req: Request, res: Response) {
+  const { startDate, endDate, department } = req.query as any;
+
+  const start = startDate ? moment(startDate).startOf("day") : moment().subtract(6, "months").startOf("day");
+  const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+
+  const allReports = await reportRepository.find();
+  const assets = await assetRepository.find();
+  const assetMap = new Map(assets.map((a) => [a.id, a]));
+
+  let reports = allReports.filter((r) => {
+    const createdAt = moment(r.createdAt);
+    return createdAt.isBetween(start, end, null, "[]");
+  });
+
+  if (department) {
+    reports = reports.filter((r) => {
+      const asset = assetMap.get(r.assetId);
+      return asset?.department === department;
+    });
+  }
+
+  const monthStats: Record<string, Record<string, any>> = {};
+  const deptSet = new Set<string>();
+
+  for (const report of reports) {
+    const asset = assetMap.get(report.assetId);
+    const dept = asset?.department || "未知";
+    deptSet.add(dept);
+
+    const createMonth = moment(report.createdAt).format("YYYY-MM");
+
+    if (!monthStats[createMonth]) {
+      monthStats[createMonth] = {};
+    }
+    if (!monthStats[createMonth][dept]) {
+      monthStats[createMonth][dept] = {
+        month: createMonth,
+        department: dept,
+        newCount: 0,
+        resolvedCount: 0,
+        processingDays: [] as number[],
+        avgProcessingDays: 0,
+      };
+    }
+
+    monthStats[createMonth][dept].newCount++;
+
+    if ((report.status === "resolved" || report.status === "closed") && report.handledAt) {
+      const resolvedMonth = moment(report.handledAt).format("YYYY-MM");
+      const processingDays = moment(report.handledAt).diff(moment(report.createdAt), "days", true);
+
+      if (!monthStats[resolvedMonth]) {
+        monthStats[resolvedMonth] = {};
+      }
+      if (!monthStats[resolvedMonth][dept]) {
+        monthStats[resolvedMonth][dept] = {
+          month: resolvedMonth,
+          department: dept,
+          newCount: 0,
+          resolvedCount: 0,
+          processingDays: [] as number[],
+          avgProcessingDays: 0,
+        };
+      }
+
+      monthStats[resolvedMonth][dept].resolvedCount++;
+      monthStats[resolvedMonth][dept].processingDays.push(Math.max(0, Math.round(processingDays)));
+    }
+  }
+
+  const months: string[] = [];
+  let current = start.clone().startOf("month");
+  while (current.isBefore(end) || current.isSame(end, "month")) {
+    months.push(current.format("YYYY-MM"));
+    current = current.add(1, "month");
+  }
+
+  const result: any[] = [];
+  for (const month of months) {
+    const monthData = monthStats[month] || {};
+    for (const dept of deptSet) {
+      const data = monthData[dept] || {
+        month,
+        department: dept,
+        newCount: 0,
+        resolvedCount: 0,
+        processingDays: [],
+        avgProcessingDays: 0,
+      };
+
+      const avgProcessingDays =
+        data.processingDays.length > 0
+          ? Math.round(data.processingDays.reduce((a: number, b: number) => a + b, 0) / data.processingDays.length)
+          : 0;
+
+      result.push({
+        month,
+        monthLabel: moment(month).format("YYYY年MM月"),
+        department: dept,
+        newCount: data.newCount,
+        resolvedCount: data.resolvedCount,
+        avgProcessingDays,
+        closureRate:
+          data.newCount > 0
+            ? Math.round((data.resolvedCount / data.newCount) * 100)
+            : data.resolvedCount > 0
+              ? 100
+              : 0,
+      });
+    }
+  }
+
+  const summary: any = {};
+  for (const dept of deptSet) {
+    const deptData = result.filter((r) => r.department === dept);
+    summary[dept] = {
+      department: dept,
+      totalNew: deptData.reduce((sum: number, r: any) => sum + r.newCount, 0),
+      totalResolved: deptData.reduce((sum: number, r: any) => sum + r.resolvedCount, 0),
+      avgProcessingDays:
+        deptData.length > 0
+          ? Math.round(
+              deptData.reduce((sum: number, r: any) => sum + r.avgProcessingDays, 0) / deptData.length
+            )
+          : 0,
+      avgClosureRate:
+        deptData.length > 0
+          ? Math.round(
+              deptData.reduce((sum: number, r: any) => sum + r.closureRate, 0) / deptData.length
+            )
+          : 0,
+    };
+  }
+
+  success(res, {
+    period: {
+      startDate: start.format("YYYY-MM-DD"),
+      endDate: end.format("YYYY-MM-DD"),
+    },
+    months,
+    departments: Array.from(deptSet),
+    monthlyData: result,
+    summary: Object.values(summary),
+  });
+}

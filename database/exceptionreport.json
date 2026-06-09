@@ -5,7 +5,7 @@
       "assetId": 1,
       "reporterId": 1,
       "exceptionType": "malfunction",
-      "status": "pending",
+      "status": "assigned",
       "description": "电脑开机蓝屏，无法正常启动",
       "photos": [],
       "location": "A座3楼技术部",
@@ -13,8 +13,26 @@
       "longitude": 116.4074,
       "id": 1,
       "createdAt": "2026-06-09T19:01:30.766Z",
-      "updatedAt": "2026-06-09T19:01:30.766Z"
+      "updatedAt": "2026-06-09T19:21:56.612Z",
+      "handlerId": 4,
+      "handlerType": "maintenance"
+    },
+    {
+      "reportNo": "ER202606101270",
+      "assetId": 1,
+      "taskId": 2,
+      "reporterId": 1,
+      "exceptionType": "malfunction",
+      "status": "assigned",
+      "description": "电脑开机蓝屏，无法正常启动",
+      "photos": [],
+      "location": "A座3楼技术部",
+      "id": 2,
+      "createdAt": "2026-06-09T19:21:56.588Z",
+      "updatedAt": "2026-06-09T19:21:56.613Z",
+      "handlerId": 4,
+      "handlerType": "maintenance"
     }
   ],
-  "nextId": 2
+  "nextId": 3
 }

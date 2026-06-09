@@ -38,6 +38,7 @@ router.post(
   assetController.updateAssetLocation
 );
 router.get("/assets/:assetCode/location-logs", authMiddleware, assetController.getAssetLocationLogs);
+router.get("/assets/:assetCode/change-logs", authMiddleware, assetController.getAssetChangeLogs);
 
 router.post(
   "/inspection-tasks",
@@ -49,6 +50,7 @@ router.post(
 router.get("/inspection-tasks", authMiddleware, inspectionController.getInspectionTaskList);
 router.get("/inspection-tasks/my", authMiddleware, inspectionController.getMyTasks);
 router.get("/inspection-tasks/stats", authMiddleware, inspectionController.getTaskStatistics);
+router.get("/inspection-tasks/asset/:assetCode/history", authMiddleware, inspectionController.getAssetInspectionHistory);
 router.get("/inspection-tasks/:id", authMiddleware, inspectionController.getInspectionTaskDetail);
 router.put(
   "/inspection-tasks/:id",
@@ -79,6 +81,12 @@ router.get("/exceptions/todo-stats", authMiddleware, exceptionController.getTodo
 router.get("/exceptions/:id", authMiddleware, exceptionController.getExceptionDetail);
 
 router.get("/process/handlers", authMiddleware, processController.getHandlerList);
+router.post(
+  "/exceptions/batch-assign",
+  authMiddleware,
+  roleMiddleware("admin"),
+  processController.batchAssignExceptions
+);
 router.post(
   "/exceptions/:id/assign",
   authMiddleware,
@@ -129,6 +137,12 @@ router.get(
   authMiddleware,
   validateQuery(statsQuerySchema),
   statsController.getRepairCostStats
+);
+router.get(
+  "/stats/exception-closure-board",
+  authMiddleware,
+  validateQuery(statsQuerySchema),
+  statsController.getExceptionClosureBoard
 );
 
 export default router;
