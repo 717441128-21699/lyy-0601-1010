@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { AppDataSource, In } from "../db/Database";
 import { InspectionTask, TaskStatus, TaskCycle } from "../entities/InspectionTask";
+import { InspectionTaskBatch } from "../entities/InspectionTaskBatch";
 import { Asset } from "../entities/Asset";
 import { User } from "../entities/User";
 import { ExceptionReport } from "../entities/ExceptionReport";
@@ -8,6 +9,7 @@ import { success, paginate, error } from "../utils/response";
 import moment from "moment";
 
 const taskRepository = AppDataSource.getRepository<InspectionTask>("InspectionTask");
+const batchRepository = AppDataSource.getRepository<InspectionTaskBatch>("InspectionTaskBatch");
 const assetRepository = AppDataSource.getRepository<Asset>("Asset");
 const userRepository = AppDataSource.getRepository<User>("User");
 const exceptionRepository = AppDataSource.getRepository<ExceptionReport>("ExceptionReport");
@@ -371,36 +373,68 @@ export async function getTaskStatistics(req: Request, res: Response) {
 
 export async function getAssetInspectionHistory(req: Request, res: Response) {
   const { assetCode } = req.params;
+  const { batchId, page = 1, pageSize = 20 } = req.query as any;
 
   const asset = await assetRepository.findOne({ where: { assetCode } });
   if (!asset) {
     return error(res, "资产不存在", 404);
   }
 
+  const taskWhere: any = { assetId: asset.id };
+  if (batchId) {
+    taskWhere.batchId = Number(batchId);
+  }
+
   const tasks = await taskRepository.find({
-    where: { assetId: asset.id },
+    where: taskWhere,
     order: { createdAt: "DESC" },
   });
 
-  const exceptions = await exceptionRepository.find({
-    where: { assetId: asset.id },
-    order: { createdAt: "DESC" },
-  });
+  let exceptions: ExceptionReport[] = [];
+  if (batchId) {
+    const batchTasks = await taskRepository.find({ where: { batchId: Number(batchId), assetId: asset.id } });
+    const taskIds = batchTasks.map((t) => t.id);
+    exceptions = await exceptionRepository.find({
+      where: { assetId: asset.id, taskId: In(taskIds) },
+      order: { createdAt: "DESC" },
+    });
+  } else {
+    exceptions = await exceptionRepository.find({
+      where: { assetId: asset.id },
+      order: { createdAt: "DESC" },
+    });
+  }
+
+  const batchIds = [...new Set(tasks.map((t) => t.batchId).filter(Boolean))];
+  const batches = await batchRepository.find({ where: { id: In(batchIds) } });
+  const batchMap = new Map(batches.map((b) => [b.id, b]));
 
   const tasksWithRelations = await loadTaskRelations(tasks);
+  const tasksWithBatch = tasksWithRelations.map((t) => ({
+    ...t,
+    batch: t.batchId ? batchMap.get(t.batchId) : null,
+  }));
 
   const inspectorIds = [...new Set(exceptions.map((e) => e.reporterId).concat(exceptions.map((e) => e.handlerId)).filter(Boolean))];
   const users = await userRepository.find({ where: { id: In(inspectorIds) } });
   const userMap = new Map(users.map((u) => [u.id, u]));
 
+  const exceptionTaskIds = [...new Set(exceptions.map((e) => e.taskId).filter(Boolean))];
+  const exceptionTasks = await taskRepository.find({ where: { id: In(exceptionTaskIds) } });
+  const exceptionTaskMap = new Map(exceptionTasks.map((t) => [t.id, t]));
+
   const exceptionsWithRelations = exceptions.map((exp) => ({
     ...exp,
     reporter: userMap.get(exp.reporterId),
     handler: exp.handlerId ? userMap.get(exp.handlerId) : undefined,
+    task: exp.taskId ? exceptionTaskMap.get(exp.taskId) : null,
+    batch: exp.taskId && exceptionTaskMap.get(exp.taskId)?.batchId
+      ? batchMap.get(exceptionTaskMap.get(exp.taskId)!.batchId)
+      : null,
   }));
 
-  const history = [
-    ...tasksWithRelations.map((t) => ({
+  const allHistory = [
+    ...tasksWithBatch.map((t) => ({
       ...t,
       type: "inspection" as const,
     })),
@@ -410,10 +444,38 @@ export async function getAssetInspectionHistory(req: Request, res: Response) {
     })),
   ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+  const total = allHistory.length;
+  const history = allHistory.slice((page - 1) * pageSize, page * pageSize);
+
+  const totalInspections = tasks.length;
+  const totalExceptions = exceptions.length;
+
+  const batchStats = [];
+  for (const batch of batches) {
+    const batchTasks = tasks.filter((t) => t.batchId === batch.id);
+    const batchExceptions = exceptions.filter((e) =>
+      e.taskId && exceptionTaskMap.get(e.taskId)?.batchId === batch.id
+    );
+    const completed = batchTasks.filter((t) => t.status === "completed").length;
+    batchStats.push({
+      batchId: batch.id,
+      batchNo: batch.batchNo,
+      title: batch.title,
+      totalTasks: batchTasks.length,
+      completedTasks: completed,
+      exceptionCount: batchExceptions.length,
+      createdAt: batch.createdAt,
+    });
+  }
+
   success(res, {
     asset,
-    totalInspections: tasks.length,
-    totalExceptions: exceptions.length,
+    totalInspections,
+    totalExceptions,
+    total,
+    page,
+    pageSize,
+    batchStats,
     history,
   }, "查询成功");
 }

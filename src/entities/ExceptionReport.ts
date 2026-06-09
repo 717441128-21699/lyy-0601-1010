@@ -6,6 +6,7 @@ import { ProcessFlow } from "./ProcessFlow";
 export type ExceptionType = "damage" | "lost" | "malfunction" | "expired" | "missing" | "other";
 export type ExceptionStatus = "pending" | "assigned" | "processing" | "resolved" | "closed";
 export type HandlerType = "maintenance" | "admin_staff" | "other";
+export type TimeoutStatus = "normal" | "warning" | "overdue";
 
 export class ExceptionReport {
   id!: number;
@@ -53,6 +54,8 @@ export class ExceptionReport {
   processFlows!: ProcessFlow[];
 
   closeRemark!: string;
+
+  expectedDeadline!: Date;
 
   createdAt!: Date;
 

@@ -1,22 +1,121 @@
 import { Request, Response } from "express";
-import { AppDataSource, Between } from "../db/Database";
+import { AppDataSource, In } from "../db/Database";
 import { Asset } from "../entities/Asset";
-import { ExceptionReport, ExceptionType } from "../entities/ExceptionReport";
+import { ExceptionReport, ExceptionType, TimeoutStatus } from "../entities/ExceptionReport";
 import { InspectionTask } from "../entities/InspectionTask";
-import { success, error } from "../utils/response";
+import { User } from "../entities/User";
+import { success, paginate, error } from "../utils/response";
 import moment from "moment";
 
 const assetRepository = AppDataSource.getRepository<Asset>("Asset");
 const reportRepository = AppDataSource.getRepository<ExceptionReport>("ExceptionReport");
 const taskRepository = AppDataSource.getRepository<InspectionTask>("InspectionTask");
+const userRepository = AppDataSource.getRepository<User>("User");
 
 async function getAssetById(id: number): Promise<Asset | undefined> {
   return assetRepository.findOne({ where: { id } });
 }
 
 async function getUserById(id: number): Promise<any | undefined> {
-  const userRepo = AppDataSource.getRepository<any>("User");
-  return userRepo.findOne({ where: { id } });
+  return userRepository.findOne({ where: { id } });
+}
+
+function calculateTimeoutStatus(expectedDeadline?: Date): {
+  timeoutStatus: TimeoutStatus;
+  isOverdue: boolean;
+  isWarning: boolean;
+} {
+  if (!expectedDeadline) {
+    return {
+      timeoutStatus: "normal",
+      isOverdue: false,
+      isWarning: false,
+    };
+  }
+
+  const now = moment();
+  const deadline = moment(expectedDeadline);
+  const diffMs = deadline.diff(now);
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+  let timeoutStatus: TimeoutStatus = "normal";
+  let isOverdue = false;
+  let isWarning = false;
+
+  if (diffMs < 0) {
+    timeoutStatus = "overdue";
+    isOverdue = true;
+  } else if (diffDays <= 1) {
+    timeoutStatus = "warning";
+    isWarning = true;
+  }
+
+  return {
+    timeoutStatus,
+    isOverdue,
+    isWarning,
+  };
+}
+
+interface FilterParams {
+  department?: string;
+  exceptionType?: string;
+  handlerId?: string;
+  assetCategory?: string;
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+}
+
+async function filterReports(
+  reports: ExceptionReport[],
+  params: FilterParams,
+  assetMap: Map<number, Asset>,
+  userMap: Map<number, User>
+): Promise<ExceptionReport[]> {
+  const { department, exceptionType, handlerId, assetCategory, startDate, endDate, status } = params;
+
+  return reports.filter((report) => {
+    if (department) {
+      const asset = assetMap.get(report.assetId);
+      if (!asset || asset.department !== department) return false;
+    }
+
+    if (exceptionType && report.exceptionType !== exceptionType) {
+      return false;
+    }
+
+    if (handlerId) {
+      if (report.handlerId !== Number(handlerId)) return false;
+    }
+
+    if (assetCategory) {
+      const asset = assetMap.get(report.assetId);
+      if (!asset || asset.category !== assetCategory) return false;
+    }
+
+    if (status && report.status !== status) {
+      return false;
+    }
+
+    if (startDate || endDate) {
+      const start = startDate ? moment(startDate).startOf("day") : moment(0);
+      const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+      if (!moment(report.createdAt).isBetween(start, end, null, "[]")) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+async function loadFilterRelations() {
+  const assets = await assetRepository.find();
+  const users = await userRepository.find();
+  const assetMap = new Map(assets.map((a) => [a.id, a]));
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  return { assets, users, assetMap, userMap };
 }
 
 export async function getDashboardStats(req: Request, res: Response) {
@@ -617,5 +716,254 @@ export async function getExceptionClosureBoard(req: Request, res: Response) {
     departments: Array.from(deptSet),
     monthlyData: result,
     summary: Object.values(summary),
+  });
+}
+
+export async function getExceptionCombinedStats(req: Request, res: Response) {
+  const {
+    department,
+    exceptionType,
+    handlerId,
+    assetCategory,
+    startDate,
+    endDate,
+    page = 1,
+    pageSize = 20,
+  } = req.query as any;
+
+  const { assetMap, userMap } = await loadFilterRelations();
+  const allReports = await reportRepository.find({ order: { createdAt: "DESC" } });
+
+  const filterParams: FilterParams = {
+    department,
+    exceptionType,
+    handlerId,
+    assetCategory,
+    startDate,
+    endDate,
+  };
+
+  const filteredReports = await filterReports(allReports, filterParams, assetMap, userMap);
+
+  const total = filteredReports.length;
+  let pending = 0;
+  let assigned = 0;
+  let processing = 0;
+  let resolved = 0;
+  let closed = 0;
+  let normal = 0;
+  let warning = 0;
+  let overdue = 0;
+  let totalRepairCost = 0;
+  let avgProcessingDays = 0;
+  const processingDaysList: number[] = [];
+
+  const byDepartment: Record<string, any> = {};
+  const byType: Record<string, any> = {};
+  const byHandler: Record<string, any> = {};
+  const byCategory: Record<string, any> = {};
+
+  for (const report of filteredReports) {
+    if (report.status === "pending") pending++;
+    if (report.status === "assigned") assigned++;
+    if (report.status === "processing") processing++;
+    if (report.status === "resolved") resolved++;
+    if (report.status === "closed") closed++;
+
+    const timeoutInfo = calculateTimeoutStatus(report.expectedDeadline);
+    if (timeoutInfo.timeoutStatus === "normal") normal++;
+    if (timeoutInfo.timeoutStatus === "warning") warning++;
+    if (timeoutInfo.timeoutStatus === "overdue") overdue++;
+
+    if (report.repairCost) {
+      totalRepairCost += report.repairCost;
+    }
+
+    if ((report.status === "resolved" || report.status === "closed") && report.handledAt) {
+      const days = moment(report.handledAt).diff(moment(report.createdAt), "days", true);
+      processingDaysList.push(Math.max(0, Math.round(days)));
+    }
+
+    const asset = assetMap.get(report.assetId);
+    const dept = asset?.department || "未知";
+    const category = asset?.category || "未知";
+    const handler = report.handlerId ? userMap.get(report.handlerId) : null;
+
+    if (!byDepartment[dept]) {
+      byDepartment[dept] = { department: dept, total: 0, resolved: 0, unresolved: 0, overdue: 0 };
+    }
+    byDepartment[dept].total++;
+    if (report.status === "resolved" || report.status === "closed") byDepartment[dept].resolved++;
+    else byDepartment[dept].unresolved++;
+    if (timeoutInfo.isOverdue) byDepartment[dept].overdue++;
+
+    const typeKey = report.exceptionType;
+    if (!byType[typeKey]) {
+      byType[typeKey] = {
+        type: typeKey,
+        label: getExceptionTypeLabel(typeKey),
+        total: 0,
+        resolved: 0,
+        unresolved: 0,
+        overdue: 0,
+      };
+    }
+    byType[typeKey].total++;
+    if (report.status === "resolved" || report.status === "closed") byType[typeKey].resolved++;
+    else byType[typeKey].unresolved++;
+    if (timeoutInfo.isOverdue) byType[typeKey].overdue++;
+
+    if (handler) {
+      const handlerKey = String(handler.id);
+      if (!byHandler[handlerKey]) {
+        byHandler[handlerKey] = {
+          handlerId: handler.id,
+          handlerName: handler.name,
+          handlerRole: handler.role,
+          handlerDepartment: handler.department,
+          total: 0,
+          resolved: 0,
+          unresolved: 0,
+          overdue: 0,
+        };
+      }
+      byHandler[handlerKey].total++;
+      if (report.status === "resolved" || report.status === "closed") byHandler[handlerKey].resolved++;
+      else byHandler[handlerKey].unresolved++;
+      if (timeoutInfo.isOverdue) byHandler[handlerKey].overdue++;
+    }
+
+    if (!byCategory[category]) {
+      byCategory[category] = { category, total: 0, resolved: 0, unresolved: 0, overdue: 0 };
+    }
+    byCategory[category].total++;
+    if (report.status === "resolved" || report.status === "closed") byCategory[category].resolved++;
+    else byCategory[category].unresolved++;
+    if (timeoutInfo.isOverdue) byCategory[category].overdue++;
+  }
+
+  avgProcessingDays = processingDaysList.length > 0
+    ? Math.round(processingDaysList.reduce((a, b) => a + b, 0) / processingDaysList.length)
+    : 0;
+
+  const summary = {
+    total,
+    byStatus: {
+      pending,
+      assigned,
+      processing,
+      resolved,
+      closed,
+      unresolved: pending + assigned + processing,
+    },
+    byTimeout: {
+      normal,
+      warning,
+      overdue,
+    },
+    totalRepairCost,
+    avgProcessingDays,
+    resolutionRate: total > 0 ? Math.round(((resolved + closed) / total) * 100) : 0,
+    overdueRate: total > 0 ? Math.round((overdue / total) * 100) : 0,
+  };
+
+  const list = filteredReports.slice((page - 1) * pageSize, page * pageSize).map((report) => {
+    const asset = assetMap.get(report.assetId);
+    const reporter = report.reporterId ? userMap.get(report.reporterId) : null;
+    const handler = report.handlerId ? userMap.get(report.handlerId) : null;
+    const timeoutInfo = calculateTimeoutStatus(report.expectedDeadline);
+
+    return {
+      ...report,
+      asset,
+      reporter: reporter ? { id: reporter.id, name: reporter.name, role: reporter.role, department: reporter.department } : null,
+      handler: handler ? { id: handler.id, name: handler.name, role: handler.role, department: handler.department } : null,
+      ...timeoutInfo,
+    };
+  });
+
+  success(res, {
+    filterParams: {
+      department,
+      exceptionType,
+      handlerId,
+      assetCategory,
+      startDate,
+      endDate,
+    },
+    summary,
+    charts: {
+      byDepartment: Object.values(byDepartment).sort((a, b) => b.total - a.total),
+      byType: Object.values(byType).sort((a, b) => b.total - a.total),
+      byHandler: Object.values(byHandler).sort((a, b) => b.total - a.total),
+      byCategory: Object.values(byCategory).sort((a, b) => b.total - a.total),
+    },
+    list,
+    pagination: {
+      page: Number(page),
+      pageSize: Number(pageSize),
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    },
+  });
+}
+
+export async function getExceptionFilterOptions(req: Request, res: Response) {
+  const { department, exceptionType, handlerId, assetCategory, startDate, endDate } = req.query as any;
+
+  const { assets, users, assetMap, userMap } = await loadFilterRelations();
+  const allReports = await reportRepository.find();
+
+  const filterParams: FilterParams = {
+    department,
+    exceptionType,
+    handlerId,
+    assetCategory,
+    startDate,
+    endDate,
+  };
+
+  const filteredReports = await filterReports(allReports, filterParams, assetMap, userMap);
+  const filteredAssetIds = new Set(filteredReports.map((r) => r.assetId));
+  const filteredHandlerIds = new Set(filteredReports.map((r) => r.handlerId).filter(Boolean));
+
+  const departmentSet = new Set<string>();
+  const categorySet = new Set<string>();
+  const handlerSet = new Set<number>();
+  const typeSet = new Set<string>();
+
+  for (const report of filteredReports) {
+    const asset = assetMap.get(report.assetId);
+    if (asset) {
+      departmentSet.add(asset.department);
+      categorySet.add(asset.category);
+    }
+    if (report.handlerId) {
+      handlerSet.add(report.handlerId);
+    }
+    typeSet.add(report.exceptionType);
+  }
+
+  const departments = Array.from(departmentSet).map((d) => ({ value: d, label: d }));
+  const categories = Array.from(categorySet).map((c) => ({ value: c, label: c }));
+  const types = Array.from(typeSet).map((t) => ({
+    value: t,
+    label: getExceptionTypeLabel(t as ExceptionType),
+  }));
+  const handlers = Array.from(handlerSet)
+    .map((id) => userMap.get(id))
+    .filter(Boolean)
+    .map((u) => ({
+      value: u!.id,
+      label: u!.name,
+      role: u!.role,
+      department: u!.department,
+    }));
+
+  success(res, {
+    departments,
+    exceptionTypes: types,
+    handlers,
+    assetCategories: categories,
   });
 }

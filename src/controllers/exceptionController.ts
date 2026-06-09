@@ -1,10 +1,11 @@
 import { Request, Response } from "express";
 import { AppDataSource, In } from "../db/Database";
-import { ExceptionReport, ExceptionStatus, ExceptionType } from "../entities/ExceptionReport";
+import { ExceptionReport, ExceptionStatus, ExceptionType, TimeoutStatus } from "../entities/ExceptionReport";
 import { Asset, AssetStatus } from "../entities/Asset";
 import { ProcessFlow, FlowAction } from "../entities/ProcessFlow";
 import { User } from "../entities/User";
 import { InspectionTask } from "../entities/InspectionTask";
+import { ExceptionOperationLog, OperationType } from "../entities/ExceptionOperationLog";
 import { success, paginate, error } from "../utils/response";
 import moment from "moment";
 
@@ -13,6 +14,7 @@ const assetRepository = AppDataSource.getRepository<Asset>("Asset");
 const flowRepository = AppDataSource.getRepository<ProcessFlow>("ProcessFlow");
 const userRepository = AppDataSource.getRepository<User>("User");
 const taskRepository = AppDataSource.getRepository<InspectionTask>("InspectionTask");
+const operationLogRepository = AppDataSource.getRepository<ExceptionOperationLog>("ExceptionOperationLog");
 
 function generateReportNo(): string {
   const date = moment().format("YYYYMMDD");
@@ -54,6 +56,83 @@ function getAssetStatusFromException(exceptionType: ExceptionType): AssetStatus 
     other: "abnormal",
   };
   return statusMap[exceptionType] || "abnormal";
+}
+
+function calculateTimeoutStatus(expectedDeadline?: Date): {
+  timeoutStatus: TimeoutStatus;
+  remainingDays: number;
+  remainingHours: number;
+  isOverdue: boolean;
+  isWarning: boolean;
+} {
+  if (!expectedDeadline) {
+    return {
+      timeoutStatus: "normal",
+      remainingDays: 0,
+      remainingHours: 0,
+      isOverdue: false,
+      isWarning: false,
+    };
+  }
+
+  const now = moment();
+  const deadline = moment(expectedDeadline);
+  const diffMs = deadline.diff(now);
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  const diffHours = Math.ceil(diffMs / (1000 * 60 * 60));
+
+  let timeoutStatus: TimeoutStatus = "normal";
+  let isOverdue = false;
+  let isWarning = false;
+
+  if (diffMs < 0) {
+    timeoutStatus = "overdue";
+    isOverdue = true;
+  } else if (diffDays <= 1) {
+    timeoutStatus = "warning";
+    isWarning = true;
+  }
+
+  return {
+    timeoutStatus,
+    remainingDays: diffDays,
+    remainingHours: diffHours,
+    isOverdue,
+    isWarning,
+  };
+}
+
+function addTimeoutInfo(report: any) {
+  const timeoutInfo = calculateTimeoutStatus(report.expectedDeadline);
+  return {
+    ...report,
+    ...timeoutInfo,
+  };
+}
+
+async function addOperationLog(
+  exceptionId: number,
+  operatorId: number,
+  operationType: OperationType,
+  oldStatus: ExceptionStatus,
+  newStatus: ExceptionStatus,
+  oldHandlerId: number | null,
+  newHandlerId: number | null,
+  remark?: string
+) {
+  const log = operationLogRepository.create({
+    exceptionId,
+    operatorId,
+    operationType,
+    oldStatus,
+    newStatus,
+    oldHandlerId,
+    newHandlerId,
+    remark: remark || "",
+    createdAt: new Date(),
+  });
+  await operationLogRepository.save(log);
+  return log;
 }
 
 export async function reportException(req: Request, res: Response) {
@@ -109,6 +188,17 @@ export async function reportException(req: Request, res: Response) {
       undefined,
       undefined,
       "pending"
+    );
+
+    await addOperationLog(
+      report.id,
+      reporterId,
+      "create",
+      "pending" as ExceptionStatus,
+      "pending" as ExceptionStatus,
+      null,
+      null,
+      `上报异常: ${description}`
     );
 
     const newAssetStatus = getAssetStatusFromException(exceptionType as ExceptionType);
@@ -200,12 +290,15 @@ export async function getExceptionList(req: Request, res: Response) {
     return true;
   });
 
-  const listWithRelations = filteredReports.slice((page - 1) * pageSize, page * pageSize).map((report) => ({
-    ...report,
-    asset: assetMap.get(report.assetId),
-    reporter: userMap.get(report.reporterId),
-    handler: report.handlerId ? userMap.get(report.handlerId) : undefined,
-  }));
+  const listWithRelations = filteredReports.slice((page - 1) * pageSize, page * pageSize).map((report) => {
+    const reportWithRelations: any = {
+      ...report,
+      asset: assetMap.get(report.assetId),
+      reporter: userMap.get(report.reporterId),
+      handler: report.handlerId ? userMap.get(report.handlerId) : undefined,
+    };
+    return addTimeoutInfo(reportWithRelations);
+  });
 
   const total = filteredReports.length;
 
@@ -336,12 +429,15 @@ export async function getTodoList(req: Request, res: Response) {
   });
 
   const total = filteredReports.length;
-  const list = filteredReports.slice((page - 1) * pageSize, page * pageSize).map((report) => ({
-    ...report,
-    asset: assetMap.get(report.assetId),
-    reporter: userMap.get(report.reporterId),
-    handler: report.handlerId ? userMap.get(report.handlerId) : undefined,
-  }));
+  const list = filteredReports.slice((page - 1) * pageSize, page * pageSize).map((report) => {
+    const reportWithRelations: any = {
+      ...report,
+      asset: assetMap.get(report.assetId),
+      reporter: userMap.get(report.reporterId),
+      handler: report.handlerId ? userMap.get(report.handlerId) : undefined,
+    };
+    return addTimeoutInfo(reportWithRelations);
+  });
 
   paginate(res, list, total, page, pageSize, "查询成功");
 }
@@ -353,19 +449,48 @@ export async function getTodoStats(req: Request, res: Response) {
 
   const userId = req.user.userId;
   const isAdmin = req.user.role === "admin";
+  const activeStatuses = ["pending", "assigned", "processing"] as ExceptionStatus[];
+
+  const allReports = await reportRepository.find({ where: { status: In(activeStatuses) } });
+
+  const myReports = allReports.filter((report) => {
+    if (!activeStatuses.includes(report.status)) return false;
+    if (isAdmin) return true;
+    if (report.status === "pending") return false;
+    return report.handlerId === userId;
+  });
 
   let pending = 0;
-  if (isAdmin) {
-    pending = await reportRepository.count({ where: { status: "pending" } });
+  let assigned = 0;
+  let processing = 0;
+  let normal = 0;
+  let warning = 0;
+  let overdue = 0;
+
+  for (const report of myReports) {
+    if (report.status === "pending") pending++;
+    if (report.status === "assigned") assigned++;
+    if (report.status === "processing") processing++;
+
+    const timeoutInfo = calculateTimeoutStatus(report.expectedDeadline);
+    if (timeoutInfo.timeoutStatus === "normal") normal++;
+    if (timeoutInfo.timeoutStatus === "warning") warning++;
+    if (timeoutInfo.timeoutStatus === "overdue") overdue++;
   }
 
-  const assigned = await reportRepository.count({ where: { status: "assigned", handlerId: userId } });
-  const processing = await reportRepository.count({ where: { status: "processing", handlerId: userId } });
-
   success(res, {
-    pending,
-    assigned,
-    processing,
-    total: pending + assigned + processing,
+    byStatus: {
+      pending,
+      assigned,
+      processing,
+      total: pending + assigned + processing,
+    },
+    byTimeout: {
+      normal,
+      warning,
+      overdue,
+      total: normal + warning + overdue,
+    },
+    total: myReports.length,
   });
 }

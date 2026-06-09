@@ -4,12 +4,15 @@ import { ExceptionReport, ExceptionStatus, HandlerType } from "../entities/Excep
 import { ProcessFlow, FlowAction } from "../entities/ProcessFlow";
 import { Asset, AssetStatus } from "../entities/Asset";
 import { User } from "../entities/User";
+import { ExceptionOperationLog, OperationType } from "../entities/ExceptionOperationLog";
 import { success, error, paginate } from "../utils/response";
+import moment from "moment";
 
 const reportRepository = AppDataSource.getRepository<ExceptionReport>("ExceptionReport");
 const flowRepository = AppDataSource.getRepository<ProcessFlow>("ProcessFlow");
 const assetRepository = AppDataSource.getRepository<Asset>("Asset");
 const userRepository = AppDataSource.getRepository<User>("User");
+const operationLogRepository = AppDataSource.getRepository<ExceptionOperationLog>("ExceptionOperationLog");
 
 async function addProcessFlow(
   reportId: number,
@@ -35,13 +38,38 @@ async function addProcessFlow(
   return flow;
 }
 
+async function addOperationLog(
+  exceptionId: number,
+  operatorId: number,
+  operationType: OperationType,
+  oldStatus: ExceptionStatus,
+  newStatus: ExceptionStatus,
+  oldHandlerId: number | null,
+  newHandlerId: number | null,
+  remark?: string
+) {
+  const log = operationLogRepository.create({
+    exceptionId,
+    operatorId,
+    operationType,
+    oldStatus,
+    newStatus,
+    oldHandlerId,
+    newHandlerId,
+    remark: remark || "",
+    createdAt: new Date(),
+  });
+  await operationLogRepository.save(log);
+  return log;
+}
+
 export async function assignException(req: Request, res: Response) {
   if (!req.user) {
     return error(res, "未登录", 401);
   }
 
   const { id } = req.params;
-  const { handlerId, handlerType, remark } = req.body;
+  const { handlerId, handlerType, remark, expectedDeadline } = req.body;
   const operatorId = req.user.userId;
 
   const report = await reportRepository.findOne({ where: { id: Number(id) } });
@@ -58,13 +86,18 @@ export async function assignException(req: Request, res: Response) {
     return error(res, "处理人不存在", 404);
   }
 
-  const previousStatus = report.status;
+  const oldStatus = report.status;
+  const oldHandlerId = report.handlerId || null;
   const newStatus = "assigned" as ExceptionStatus;
+  const operationType = report.handlerId ? "reassign" : "assign";
 
   await AppDataSource.transaction(async () => {
     report.handlerId = handlerId;
     report.handlerType = handlerType as HandlerType;
     report.status = newStatus;
+    if (expectedDeadline) {
+      report.expectedDeadline = new Date(expectedDeadline);
+    }
     await reportRepository.save(report);
 
     await addProcessFlow(
@@ -74,8 +107,19 @@ export async function assignException(req: Request, res: Response) {
       remark || `分配给 ${handler.name} 处理`,
       undefined,
       handlerId,
-      previousStatus,
+      oldStatus,
       newStatus
+    );
+
+    await addOperationLog(
+      report.id,
+      operatorId,
+      operationType,
+      oldStatus,
+      newStatus,
+      oldHandlerId,
+      handlerId,
+      remark || `分配给 ${handler.name} 处理`
     );
   });
 
@@ -109,8 +153,8 @@ export async function transferException(req: Request, res: Response) {
     return error(res, "目标处理人不存在", 404);
   }
 
-  const fromUserId = report.handlerId;
-  const previousStatus = report.status;
+  const oldHandlerId = report.handlerId;
+  const oldStatus = report.status;
   const newStatus = "assigned" as ExceptionStatus;
 
   await AppDataSource.transaction(async () => {
@@ -126,10 +170,21 @@ export async function transferException(req: Request, res: Response) {
       operatorId,
       "transfer",
       remark || `流转给 ${toUser.name} 处理`,
-      fromUserId,
+      oldHandlerId,
       toUserId,
-      previousStatus,
+      oldStatus,
       newStatus
+    );
+
+    await addOperationLog(
+      report.id,
+      operatorId,
+      "reassign",
+      oldStatus,
+      newStatus,
+      oldHandlerId,
+      toUserId,
+      remark || `流转给 ${toUser.name} 处理`
     );
   });
 
@@ -157,7 +212,8 @@ export async function startProcessing(req: Request, res: Response) {
     return error(res, "只有已分配的异常才能开始处理", 400);
   }
 
-  const previousStatus = report.status;
+  const oldStatus = report.status;
+  const oldHandlerId = report.handlerId;
   const newStatus = "processing" as ExceptionStatus;
 
   await AppDataSource.transaction(async () => {
@@ -171,8 +227,19 @@ export async function startProcessing(req: Request, res: Response) {
       "开始处理",
       undefined,
       undefined,
-      previousStatus,
+      oldStatus,
       newStatus
+    );
+
+    await addOperationLog(
+      report.id,
+      operatorId,
+      "start_process",
+      oldStatus,
+      newStatus,
+      oldHandlerId,
+      oldHandlerId,
+      "开始处理"
     );
   });
 
@@ -201,16 +268,20 @@ export async function updateProcessResult(req: Request, res: Response) {
     return error(res, "该异常已处理完成，无法更新", 400);
   }
 
-  const previousStatus = report.status;
+  const oldStatus = report.status;
+  const oldHandlerId = report.handlerId;
   let newStatus: ExceptionStatus = report.status;
   let action: FlowAction = "process";
+  let operationType: OperationType = "update";
 
   if (status === "resolved") {
     newStatus = "resolved";
     action = "resolve";
+    operationType = "resolve";
   } else if (status === "closed") {
     newStatus = "closed";
     action = "close";
+    operationType = "close";
   }
 
   await AppDataSource.transaction(async () => {
@@ -232,8 +303,19 @@ export async function updateProcessResult(req: Request, res: Response) {
       handleResult,
       undefined,
       undefined,
-      previousStatus,
+      oldStatus,
       newStatus
+    );
+
+    await addOperationLog(
+      report.id,
+      operatorId,
+      operationType,
+      oldStatus,
+      newStatus,
+      oldHandlerId,
+      oldHandlerId,
+      handleResult || ""
     );
 
     if (newStatus === "closed") {
@@ -271,7 +353,8 @@ export async function closeException(req: Request, res: Response) {
     return error(res, "只有管理员才能关闭异常", 403);
   }
 
-  const previousStatus = report.status;
+  const oldStatus = report.status;
+  const oldHandlerId = report.handlerId;
   const newStatus = "closed" as ExceptionStatus;
 
   await AppDataSource.transaction(async () => {
@@ -287,8 +370,19 @@ export async function closeException(req: Request, res: Response) {
       closeRemark || "管理员关闭",
       undefined,
       undefined,
-      previousStatus,
+      oldStatus,
       newStatus
+    );
+
+    await addOperationLog(
+      report.id,
+      operatorId,
+      "close",
+      oldStatus,
+      newStatus,
+      oldHandlerId,
+      oldHandlerId,
+      closeRemark || "管理员关闭"
     );
 
     const asset = await assetRepository.findOne({ where: { id: report.assetId } });
@@ -324,7 +418,8 @@ export async function reopenException(req: Request, res: Response) {
     return error(res, "只有管理员才能重新打开异常", 403);
   }
 
-  const previousStatus = report.status;
+  const oldStatus = report.status;
+  const oldHandlerId = report.handlerId;
   const newStatus = "pending" as ExceptionStatus;
 
   await AppDataSource.transaction(async () => {
@@ -340,8 +435,19 @@ export async function reopenException(req: Request, res: Response) {
       remark || "管理员重新打开",
       undefined,
       undefined,
-      previousStatus,
+      oldStatus,
       newStatus
+    );
+
+    await addOperationLog(
+      report.id,
+      operatorId,
+      "reopen",
+      oldStatus,
+      newStatus,
+      oldHandlerId,
+      null,
+      remark || "管理员重新打开"
     );
 
     const asset = await assetRepository.findOne({ where: { id: report.assetId } });
@@ -411,7 +517,7 @@ export async function batchAssignExceptions(req: Request, res: Response) {
     return error(res, "只有管理员才能批量分配", 403);
   }
 
-  const { exceptionIds, handlerId, handlerType, remark } = req.body;
+  const { exceptionIds, handlerId, handlerType, remark, expectedDeadline } = req.body;
   const operatorId = req.user.userId;
 
   if (!Array.isArray(exceptionIds) || exceptionIds.length === 0) {
@@ -441,12 +547,17 @@ export async function batchAssignExceptions(req: Request, res: Response) {
 
   await AppDataSource.transaction(async () => {
     for (const report of reports) {
-      const previousStatus = report.status;
+      const oldStatus = report.status;
+      const oldHandlerId = report.handlerId || null;
       const newStatus = "assigned" as ExceptionStatus;
+      const operationType = report.handlerId ? "reassign" : "assign";
 
       report.handlerId = handlerId;
       report.handlerType = handlerType as HandlerType;
       report.status = newStatus;
+      if (expectedDeadline) {
+        report.expectedDeadline = new Date(expectedDeadline);
+      }
       await reportRepository.save(report);
 
       await addProcessFlow(
@@ -456,8 +567,19 @@ export async function batchAssignExceptions(req: Request, res: Response) {
         remark || `批量分配给 ${handler.name} 处理`,
         undefined,
         handlerId,
-        previousStatus,
+        oldStatus,
         newStatus
+      );
+
+      await addOperationLog(
+        report.id,
+        operatorId,
+        operationType,
+        oldStatus,
+        newStatus,
+        oldHandlerId,
+        handlerId,
+        remark || `批量分配给 ${handler.name} 处理`
       );
     }
   });
@@ -469,4 +591,39 @@ export async function batchAssignExceptions(req: Request, res: Response) {
       name: handler.name,
     },
   }, `批量分配成功，共 ${reports.length} 条异常`);
+}
+
+export async function getExceptionOperationLogs(req: Request, res: Response) {
+  const { id } = req.params;
+  const { page = 1, pageSize = 20 } = req.query as any;
+
+  const report = await reportRepository.findOne({ where: { id: Number(id) } });
+  if (!report) {
+    return error(res, "异常报告不存在", 404);
+  }
+
+  const allLogs = await operationLogRepository.find({
+    where: { exceptionId: Number(id) },
+    order: { createdAt: "DESC" },
+  });
+
+  const operatorIds = [...new Set(allLogs.map((l) => l.operatorId))];
+  const oldHandlerIds = [...new Set(allLogs.map((l) => l.oldHandlerId).filter((id): id is number => id !== null))];
+  const newHandlerIds = [...new Set(allLogs.map((l) => l.newHandlerId).filter((id): id is number => id !== null))];
+  const allUserIds = [...new Set([...operatorIds, ...oldHandlerIds, ...newHandlerIds])];
+
+  const users = await userRepository.find({ where: { id: In(allUserIds) } });
+  const userMap = new Map(users.map((u) => [u.id, { id: u.id, name: u.name, role: u.role, department: u.department }]));
+
+  const logsWithDetails = allLogs.map((log) => ({
+    ...log,
+    operator: userMap.get(log.operatorId),
+    oldHandler: log.oldHandlerId ? userMap.get(log.oldHandlerId) : null,
+    newHandler: log.newHandlerId ? userMap.get(log.newHandlerId) : null,
+  }));
+
+  const total = logsWithDetails.length;
+  const list = logsWithDetails.slice((page - 1) * pageSize, page * pageSize);
+
+  paginate(res, list, total, page, pageSize, "查询成功");
 }
