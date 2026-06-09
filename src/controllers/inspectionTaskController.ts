@@ -102,7 +102,7 @@ export async function createInspectionTask(req: Request, res: Response) {
 }
 
 export async function getInspectionTaskList(req: Request, res: Response) {
-  const { page = 1, pageSize = 10, status, inspectorId, assetCode, startDate, endDate, hasException } = req.query as any;
+  const { page = 1, pageSize = 10, status, inspectorId, assetCode, startDate, endDate, hasException, exceptionStatus } = req.query as any;
 
   const where: any = {};
   if (status) {
@@ -118,12 +118,10 @@ export async function getInspectionTaskList(req: Request, res: Response) {
   });
 
   let filteredTasks = allTasks.filter((task) => {
-    if (startDate && moment(task.createdAt).isBefore(startDate)) {
-      return false;
-    }
-    if (endDate) {
-      const endOfDay = moment(endDate).endOf("day");
-      if (moment(task.createdAt).isAfter(endOfDay)) {
+    if (startDate || endDate) {
+      const start = startDate ? moment(startDate).startOf("day") : moment(0);
+      const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+      if (!moment(task.createdAt).isBetween(start, end, null, "[]")) {
         return false;
       }
     }
@@ -141,6 +139,11 @@ export async function getInspectionTaskList(req: Request, res: Response) {
       if (hasException === "true" && !hasExp) return false;
       if (hasException === "false" && hasExp) return false;
     }
+    if (exceptionStatus) {
+      if (!task.exceptions || task.exceptions.length === 0) return false;
+      const hasMatchingStatus = task.exceptions.some((e: any) => e.status === exceptionStatus);
+      if (!hasMatchingStatus) return false;
+    }
     return true;
   });
 
@@ -148,6 +151,7 @@ export async function getInspectionTaskList(req: Request, res: Response) {
     ...task,
     hasException: !!(task.exceptions && task.exceptions.length > 0),
     exceptionCount: task.exceptions?.length || 0,
+    exceptionStatuses: task.exceptions?.map((e: any) => e.status) || [],
   })) as any[];
 
   await updateOverdueTasks();
@@ -163,7 +167,7 @@ export async function getMyTasks(req: Request, res: Response) {
     return error(res, "未登录", 401);
   }
 
-  const { page = 1, pageSize = 10, status, hasException, startDate, endDate } = req.query as any;
+  const { page = 1, pageSize = 10, status, hasException, startDate, endDate, exceptionStatus, assetCode } = req.query as any;
 
   const where: any = { inspectorId: req.user.userId };
   if (status) {
@@ -178,12 +182,10 @@ export async function getMyTasks(req: Request, res: Response) {
   });
 
   let filteredTasks = allTasks.filter((task) => {
-    if (startDate && moment(task.createdAt).isBefore(startDate)) {
-      return false;
-    }
-    if (endDate) {
-      const endOfDay = moment(endDate).endOf("day");
-      if (moment(task.createdAt).isAfter(endOfDay)) {
+    if (startDate || endDate) {
+      const start = startDate ? moment(startDate).startOf("day") : moment(0);
+      const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+      if (!moment(task.createdAt).isBetween(start, end, null, "[]")) {
         return false;
       }
     }
@@ -192,19 +194,28 @@ export async function getMyTasks(req: Request, res: Response) {
 
   let tasksWithRelations = await loadTaskRelations(filteredTasks);
 
-  if (hasException !== undefined) {
-    tasksWithRelations = tasksWithRelations.filter((task) => {
+  tasksWithRelations = tasksWithRelations.filter((task) => {
+    if (assetCode && !task.asset?.assetCode.includes(assetCode)) {
+      return false;
+    }
+    if (hasException !== undefined) {
       const hasExp = task.exceptions && task.exceptions.length > 0;
       if (hasException === "true" && !hasExp) return false;
       if (hasException === "false" && hasExp) return false;
-      return true;
-    });
-  }
+    }
+    if (exceptionStatus) {
+      if (!task.exceptions || task.exceptions.length === 0) return false;
+      const hasMatchingStatus = task.exceptions.some((e: any) => e.status === exceptionStatus);
+      if (!hasMatchingStatus) return false;
+    }
+    return true;
+  });
 
   tasksWithRelations = tasksWithRelations.map((task) => ({
     ...task,
     hasException: !!(task.exceptions && task.exceptions.length > 0),
     exceptionCount: task.exceptions?.length || 0,
+    exceptionStatuses: task.exceptions?.map((e: any) => e.status) || [],
   })) as any[];
 
   const total = tasksWithRelations.length;

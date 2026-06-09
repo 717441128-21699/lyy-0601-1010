@@ -27,31 +27,23 @@ export async function getDashboardStats(req: Request, res: Response) {
     assetWhere.department = department;
   }
 
-  const reportWhere: any = {};
-  const taskWhere: any = {};
-
-  if (startDate) {
-    reportWhere.createdAt = Between(new Date(startDate), new Date());
-    taskWhere.createdAt = Between(new Date(startDate), new Date());
-  }
-  if (endDate) {
-    reportWhere.createdAt = Between(
-      startDate ? new Date(startDate) : new Date("2000-01-01"),
-      new Date(endDate)
-    );
-    taskWhere.createdAt = Between(
-      startDate ? new Date(startDate) : new Date("2000-01-01"),
-      new Date(endDate)
-    );
-  }
-
   const allAssets = await assetRepository.find({ where: assetWhere });
   const filteredAssets = department
     ? allAssets.filter((a) => a.department === department)
     : allAssets;
 
-  const allReports = await reportRepository.find({ where: reportWhere });
-  const allTasks = await taskRepository.find({ where: taskWhere });
+  const allReports = await reportRepository.find();
+  const allTasks = await taskRepository.find();
+
+  const start = startDate ? moment(startDate).startOf("day") : moment(0);
+  const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+
+  const filteredReports = allReports.filter((r) =>
+    moment(r.createdAt).isBetween(start, end, null, "[]")
+  );
+  const filteredTasks = allTasks.filter((t) =>
+    moment(t.createdAt).isBetween(start, end, null, "[]")
+  );
 
   const totalAssets = filteredAssets.length;
   const normalAssets = filteredAssets.filter((a) => a.status === "normal").length;
@@ -59,21 +51,21 @@ export async function getDashboardStats(req: Request, res: Response) {
     ["abnormal", "damaged", "lost", "maintenance"].includes(a.status)
   ).length;
 
-  const totalReports = allReports.length;
-  const pendingReports = allReports.filter((r) => r.status === "pending").length;
-  const processingReports = allReports.filter((r) =>
+  const totalReports = filteredReports.length;
+  const pendingReports = filteredReports.filter((r) => r.status === "pending").length;
+  const processingReports = filteredReports.filter((r) =>
     ["assigned", "processing"].includes(r.status)
   ).length;
-  const resolvedReports = allReports.filter((r) =>
+  const resolvedReports = filteredReports.filter((r) =>
     ["resolved", "closed"].includes(r.status)
   ).length;
 
-  const totalTasks = allTasks.length;
-  const pendingTasks = allTasks.filter((t) =>
+  const totalTasks = filteredTasks.length;
+  const pendingTasks = filteredTasks.filter((t) =>
     ["pending", "in_progress"].includes(t.status)
   ).length;
-  const completedTasks = allTasks.filter((t) => t.status === "completed").length;
-  const overdueTasks = allTasks.filter((t) => t.status === "overdue").length;
+  const completedTasks = filteredTasks.filter((t) => t.status === "completed").length;
+  const overdueTasks = filteredTasks.filter((t) => t.status === "overdue").length;
 
   const avgHealthScore =
     filteredAssets.length > 0
@@ -113,12 +105,9 @@ export async function getExceptionStatsByDepartment(req: Request, res: Response)
   const assets = await assetRepository.find();
   const assetMap = new Map(assets.map((a) => [a.id, a]));
 
-  if (startDate) {
-    reports = reports.filter((r) => new Date(r.createdAt) >= new Date(startDate));
-  }
-  if (endDate) {
-    reports = reports.filter((r) => new Date(r.createdAt) <= new Date(endDate));
-  }
+  const start = startDate ? moment(startDate).startOf("day") : moment(0);
+  const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+  reports = reports.filter((r) => moment(r.createdAt).isBetween(start, end, null, "[]"));
 
   const deptStats: Record<string, any> = {};
 
@@ -174,12 +163,10 @@ export async function getExceptionStatsByType(req: Request, res: Response) {
   const assets = await assetRepository.find();
   const assetMap = new Map(assets.map((a) => [a.id, a]));
 
-  if (startDate) {
-    reports = reports.filter((r) => new Date(r.createdAt) >= new Date(startDate));
-  }
-  if (endDate) {
-    reports = reports.filter((r) => new Date(r.createdAt) <= new Date(endDate));
-  }
+  const start = startDate ? moment(startDate).startOf("day") : moment(0);
+  const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+  reports = reports.filter((r) => moment(r.createdAt).isBetween(start, end, null, "[]"));
+
   if (department) {
     reports = reports.filter((r) => {
       const asset = assetMap.get(r.assetId);
@@ -222,13 +209,15 @@ export async function getExceptionStatsByType(req: Request, res: Response) {
 export async function getExceptionTrend(req: Request, res: Response) {
   const { startDate, endDate, department } = req.query as any;
 
-  const start = startDate ? moment(startDate) : moment().subtract(30, "days");
-  const end = endDate ? moment(endDate) : moment();
+  const start = startDate ? moment(startDate).startOf("day") : moment().subtract(30, "days").startOf("day");
+  const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
   const days = end.diff(start, "days") + 1;
 
   let allReports = await reportRepository.find();
   const assets = await assetRepository.find();
   const assetMap = new Map(assets.map((a) => [a.id, a]));
+
+  allReports = allReports.filter((r) => moment(r.createdAt).isBetween(start, end, null, "[]"));
 
   if (department) {
     allReports = allReports.filter((r) => {
@@ -429,12 +418,10 @@ export async function getRepairCostStats(req: Request, res: Response) {
 
   reports = reports.filter((r) => r.repairCost !== null && r.repairCost !== undefined);
 
-  if (startDate) {
-    reports = reports.filter((r) => new Date(r.createdAt) >= new Date(startDate));
-  }
-  if (endDate) {
-    reports = reports.filter((r) => new Date(r.createdAt) <= new Date(endDate));
-  }
+  const start = startDate ? moment(startDate).startOf("day") : moment(0);
+  const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+  reports = reports.filter((r) => moment(r.createdAt).isBetween(start, end, null, "[]"));
+
   if (department) {
     reports = reports.filter((r) => {
       const asset = assetMap.get(r.assetId);

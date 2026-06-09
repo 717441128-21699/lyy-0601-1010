@@ -193,6 +193,8 @@ export async function getExceptionList(req: Request, res: Response) {
         if (handler?.role !== "maintenance") return false;
       } else if (handlerType === "admin_staff") {
         if (handler?.role !== "admin_staff") return false;
+      } else if (handlerType === "other") {
+        if (handler?.role === "maintenance" || handler?.role === "admin_staff") return false;
       }
     }
     return true;
@@ -350,8 +352,13 @@ export async function getTodoStats(req: Request, res: Response) {
   }
 
   const userId = req.user.userId;
+  const isAdmin = req.user.role === "admin";
 
-  const pending = await reportRepository.count({ where: { status: "pending" } });
+  let pending = 0;
+  if (isAdmin) {
+    pending = await reportRepository.count({ where: { status: "pending" } });
+  }
+
   const assigned = await reportRepository.count({ where: { status: "assigned", handlerId: userId } });
   const processing = await reportRepository.count({ where: { status: "processing", handlerId: userId } });
 
