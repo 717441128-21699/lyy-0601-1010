@@ -177,18 +177,21 @@ export async function getExceptionList(req: Request, res: Response) {
     if (assetCode && !asset?.assetCode.includes(assetCode)) {
       return false;
     }
-    if (startDate && new Date(report.createdAt) < new Date(startDate)) {
-      return false;
-    }
-    if (endDate && new Date(report.createdAt) > new Date(endDate)) {
-      return false;
+    if (startDate || endDate) {
+      const start = startDate ? moment(startDate).startOf("day") : moment(0);
+      const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+      if (!moment(report.createdAt).isBetween(start, end, null, "[]")) {
+        return false;
+      }
     }
     if (handlerType) {
-      if (handlerType === "maintenance" && report.handlerId) {
-        const handler = userMap.get(report.handlerId);
+      if (!report.handlerId) {
+        return false;
+      }
+      const handler = userMap.get(report.handlerId);
+      if (handlerType === "maintenance") {
         if (handler?.role !== "maintenance") return false;
-      } else if (handlerType === "admin_staff" && report.handlerId) {
-        const handler = userMap.get(report.handlerId);
+      } else if (handlerType === "admin_staff") {
         if (handler?.role !== "admin_staff") return false;
       }
     }
@@ -277,8 +280,13 @@ export async function getTodoList(req: Request, res: Response) {
   const userId = req.user.userId;
   const isAdmin = req.user.role === "admin";
 
+  const activeStatuses = ["pending", "assigned", "processing"];
+
   const where: any = {};
-  if (status && isAdmin) {
+  if (status) {
+    if (!activeStatuses.includes(status)) {
+      return paginate(res, [], 0, page, pageSize, "查询成功");
+    }
     where.status = status;
   }
 
@@ -297,6 +305,10 @@ export async function getTodoList(req: Request, res: Response) {
   const userMap = new Map(users.map((u) => [u.id, u]));
 
   let filteredReports = allReports.filter((report) => {
+    if (!activeStatuses.includes(report.status)) {
+      return false;
+    }
+
     if (isAdmin) {
       if (department) {
         const asset = assetMap.get(report.assetId);
@@ -311,11 +323,12 @@ export async function getTodoList(req: Request, res: Response) {
       }
     }
 
-    if (startDate && new Date(report.createdAt) < new Date(startDate)) {
-      return false;
-    }
-    if (endDate && new Date(report.createdAt) > new Date(endDate)) {
-      return false;
+    if (startDate || endDate) {
+      const start = startDate ? moment(startDate).startOf("day") : moment(0);
+      const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+      if (!moment(report.createdAt).isBetween(start, end, null, "[]")) {
+        return false;
+      }
     }
     return true;
   });

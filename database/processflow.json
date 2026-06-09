@@ -43,7 +43,37 @@
       "id": 4,
       "createdAt": "2026-06-09T19:21:56.613Z",
       "updatedAt": "2026-06-09T19:21:56.613Z"
+    },
+    {
+      "exceptionReportId": 3,
+      "operatorId": 1,
+      "action": "create",
+      "remark": "上报异常: 测试-待分配",
+      "newStatus": "pending",
+      "id": 5,
+      "createdAt": "2026-06-09T19:41:00.118Z",
+      "updatedAt": "2026-06-09T19:41:00.118Z"
+    },
+    {
+      "exceptionReportId": 4,
+      "operatorId": 1,
+      "action": "create",
+      "remark": "上报异常: 测试-分配给维修",
+      "newStatus": "pending",
+      "id": 6,
+      "createdAt": "2026-06-09T19:41:00.121Z",
+      "updatedAt": "2026-06-09T19:41:00.121Z"
+    },
+    {
+      "exceptionReportId": 5,
+      "operatorId": 1,
+      "action": "create",
+      "remark": "上报异常: 测试异常",
+      "newStatus": "pending",
+      "id": 7,
+      "createdAt": "2026-06-09T19:41:29.331Z",
+      "updatedAt": "2026-06-09T19:41:29.331Z"
     }
   ],
-  "nextId": 5
+  "nextId": 8
 }

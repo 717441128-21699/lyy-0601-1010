@@ -12,13 +12,13 @@
       "department": "市场部",
       "location": "A座3楼",
       "custodian": "孙员工",
-      "status": "abnormal",
+      "status": "damaged",
       "description": "科密 C-838T，编号AST000001",
       "lastInspectionDate": "2026-05-31T19:01:07.203Z",
-      "healthScore": 60,
+      "healthScore": 30,
       "id": 1,
       "createdAt": "2026-06-09T19:01:07.203Z",
-      "updatedAt": "2026-06-09T19:21:56.617Z"
+      "updatedAt": "2026-06-09T19:41:00.119Z"
     },
     {
       "assetCode": "AST000002",
@@ -32,13 +32,13 @@
       "department": "技术部",
       "location": "C座1楼会议室",
       "custodian": "李四",
-      "status": "normal",
+      "status": "damaged",
       "description": "爱普生 CB-FH52，编号AST000002",
       "lastInspectionDate": "2026-05-19T19:01:07.204Z",
-      "healthScore": 100,
+      "healthScore": 30,
       "id": 2,
       "createdAt": "2026-06-09T19:01:07.204Z",
-      "updatedAt": "2026-06-09T19:23:54.349Z"
+      "updatedAt": "2026-06-09T19:41:00.121Z"
     },
     {
       "assetCode": "AST000003",

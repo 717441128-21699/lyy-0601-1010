@@ -112,19 +112,20 @@ export async function getInspectionTaskList(req: Request, res: Response) {
     where.inspectorId = Number(inspectorId);
   }
 
-  const [tasks, total] = await taskRepository.findAndCount({
+  const allTasks = await taskRepository.find({
     where,
-    skip: (page - 1) * pageSize,
-    take: pageSize,
     order: { createdAt: "DESC" },
   });
 
-  let filteredTasks = tasks.filter((task) => {
+  let filteredTasks = allTasks.filter((task) => {
     if (startDate && moment(task.createdAt).isBefore(startDate)) {
       return false;
     }
-    if (endDate && moment(task.createdAt).isAfter(endDate)) {
-      return false;
+    if (endDate) {
+      const endOfDay = moment(endDate).endOf("day");
+      if (moment(task.createdAt).isAfter(endOfDay)) {
+        return false;
+      }
     }
     return true;
   });
@@ -151,7 +152,10 @@ export async function getInspectionTaskList(req: Request, res: Response) {
 
   await updateOverdueTasks();
 
-  paginate(res, tasksWithRelations, total, page, pageSize, "查询成功");
+  const total = tasksWithRelations.length;
+  const paginatedList = tasksWithRelations.slice((page - 1) * pageSize, page * pageSize);
+
+  paginate(res, paginatedList, total, page, pageSize, "查询成功");
 }
 
 export async function getMyTasks(req: Request, res: Response) {
@@ -159,7 +163,7 @@ export async function getMyTasks(req: Request, res: Response) {
     return error(res, "未登录", 401);
   }
 
-  const { page = 1, pageSize = 10, status, hasException } = req.query as any;
+  const { page = 1, pageSize = 10, status, hasException, startDate, endDate } = req.query as any;
 
   const where: any = { inspectorId: req.user.userId };
   if (status) {
@@ -168,14 +172,25 @@ export async function getMyTasks(req: Request, res: Response) {
 
   await updateOverdueTasks();
 
-  const [tasks, total] = await taskRepository.findAndCount({
+  const allTasks = await taskRepository.find({
     where,
-    skip: (page - 1) * pageSize,
-    take: pageSize,
     order: { deadline: "ASC" },
   });
 
-  let tasksWithRelations = await loadTaskRelations(tasks);
+  let filteredTasks = allTasks.filter((task) => {
+    if (startDate && moment(task.createdAt).isBefore(startDate)) {
+      return false;
+    }
+    if (endDate) {
+      const endOfDay = moment(endDate).endOf("day");
+      if (moment(task.createdAt).isAfter(endOfDay)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  let tasksWithRelations = await loadTaskRelations(filteredTasks);
 
   if (hasException !== undefined) {
     tasksWithRelations = tasksWithRelations.filter((task) => {
@@ -192,7 +207,10 @@ export async function getMyTasks(req: Request, res: Response) {
     exceptionCount: task.exceptions?.length || 0,
   })) as any[];
 
-  paginate(res, tasksWithRelations, total, page, pageSize, "查询成功");
+  const total = tasksWithRelations.length;
+  const paginatedList = tasksWithRelations.slice((page - 1) * pageSize, page * pageSize);
+
+  paginate(res, paginatedList, total, page, pageSize, "查询成功");
 }
 
 export async function getInspectionTaskDetail(req: Request, res: Response) {

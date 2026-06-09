@@ -32,7 +32,46 @@
       "updatedAt": "2026-06-09T19:21:56.613Z",
       "handlerId": 4,
       "handlerType": "maintenance"
+    },
+    {
+      "reportNo": "ER202606108732",
+      "assetId": 1,
+      "reporterId": 1,
+      "exceptionType": "damage",
+      "status": "pending",
+      "description": "测试-待分配",
+      "photos": [],
+      "location": "办公室A",
+      "id": 3,
+      "createdAt": "2026-06-09T19:41:00.118Z",
+      "updatedAt": "2026-06-09T19:41:00.118Z"
+    },
+    {
+      "reportNo": "ER202606107517",
+      "assetId": 2,
+      "reporterId": 1,
+      "exceptionType": "damage",
+      "status": "pending",
+      "description": "测试-分配给维修",
+      "photos": [],
+      "location": "办公室B",
+      "id": 4,
+      "createdAt": "2026-06-09T19:41:00.121Z",
+      "updatedAt": "2026-06-09T19:41:00.121Z"
+    },
+    {
+      "reportNo": "ER202606104474",
+      "assetId": 1,
+      "reporterId": 1,
+      "exceptionType": "damage",
+      "status": "pending",
+      "description": "测试异常",
+      "photos": [],
+      "location": "测试",
+      "id": 5,
+      "createdAt": "2026-06-09T19:41:29.331Z",
+      "updatedAt": "2026-06-09T19:41:29.331Z"
     }
   ],
-  "nextId": 3
+  "nextId": 6
 }
