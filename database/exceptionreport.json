@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "reportNo": "ER202606109496",
+      "assetId": 1,
+      "reporterId": 1,
+      "exceptionType": "malfunction",
+      "status": "pending",
+      "description": "电脑开机蓝屏，无法正常启动",
+      "photos": [],
+      "location": "A座3楼技术部",
+      "latitude": 39.9042,
+      "longitude": 116.4074,
+      "id": 1,
+      "createdAt": "2026-06-09T19:01:30.766Z",
+      "updatedAt": "2026-06-09T19:01:30.766Z"
+    }
+  ],
+  "nextId": 2
+}

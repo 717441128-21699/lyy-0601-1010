@@ -1,0 +1,15 @@
+{
+  "data": [
+    {
+      "exceptionReportId": 1,
+      "operatorId": 1,
+      "action": "create",
+      "remark": "上报异常: 电脑开机蓝屏，无法正常启动",
+      "newStatus": "pending",
+      "id": 1,
+      "createdAt": "2026-06-09T19:01:30.766Z",
+      "updatedAt": "2026-06-09T19:01:30.767Z"
+    }
+  ],
+  "nextId": 2
+}

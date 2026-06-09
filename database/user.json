@@ -1,0 +1,109 @@
+{
+  "data": [
+    {
+      "username": "admin",
+      "password": "$2a$10$HpE32L8bFtJv204P/FGDP.GUvISetszaYVbV/8l8BweuXU9126uPq",
+      "name": "系统管理员",
+      "role": "admin",
+      "department": "信息中心",
+      "phone": "13800138000",
+      "email": "admin@company.com",
+      "isActive": true,
+      "id": 1,
+      "createdAt": "2026-06-09T19:01:06.513Z",
+      "updatedAt": "2026-06-09T19:01:06.513Z"
+    },
+    {
+      "username": "inspector1",
+      "password": "$2a$10$MOPtukeLg/fFjnV3w2mIVuvdpbhHTZqp3G6gWUTY7hkeSfvmz.dXG",
+      "name": "张巡检",
+      "role": "inspector",
+      "department": "行政部",
+      "phone": "13800138001",
+      "email": "inspector1@company.com",
+      "isActive": true,
+      "id": 2,
+      "createdAt": "2026-06-09T19:01:06.609Z",
+      "updatedAt": "2026-06-09T19:01:06.609Z"
+    },
+    {
+      "username": "inspector2",
+      "password": "$2a$10$GpQvw9NhfxzARsn6HrJ35enn2Ti4L7Z25oR.U6t9qsCenHviFZLhG",
+      "name": "李巡检",
+      "role": "inspector",
+      "department": "技术部",
+      "phone": "13800138002",
+      "email": "inspector2@company.com",
+      "isActive": true,
+      "id": 3,
+      "createdAt": "2026-06-09T19:01:06.707Z",
+      "updatedAt": "2026-06-09T19:01:06.707Z"
+    },
+    {
+      "username": "maintenance1",
+      "password": "$2a$10$KycNFv9jKnvaJQAGMhx/hOG425xoSpK/GBKSHsuSQzCQw8T8qFSbK",
+      "name": "王维修",
+      "role": "maintenance",
+      "department": "维修部",
+      "phone": "13800138003",
+      "email": "maintenance1@company.com",
+      "isActive": true,
+      "id": 4,
+      "createdAt": "2026-06-09T19:01:06.804Z",
+      "updatedAt": "2026-06-09T19:01:06.804Z"
+    },
+    {
+      "username": "maintenance2",
+      "password": "$2a$10$3bTO0QIMyYJ3zDhTWTVDC.BdxkZcSPEJTJnL0ANFk4APL1.iMVmxu",
+      "name": "刘维修",
+      "role": "maintenance",
+      "department": "维修部",
+      "phone": "13800138004",
+      "email": "maintenance2@company.com",
+      "isActive": true,
+      "id": 5,
+      "createdAt": "2026-06-09T19:01:06.905Z",
+      "updatedAt": "2026-06-09T19:01:06.905Z"
+    },
+    {
+      "username": "admin_staff1",
+      "password": "$2a$10$sgD7QgKLyNGmztojD7dUMuX0AXYVY2qMCPmV7qeCICCqUDyOeUEvi",
+      "name": "陈行政",
+      "role": "admin_staff",
+      "department": "行政部",
+      "phone": "13800138005",
+      "email": "admin_staff1@company.com",
+      "isActive": true,
+      "id": 6,
+      "createdAt": "2026-06-09T19:01:07.004Z",
+      "updatedAt": "2026-06-09T19:01:07.004Z"
+    },
+    {
+      "username": "user1",
+      "password": "$2a$10$gi7qKIVS9EoFRQZpMLPOZeDYxE7.fCLUHtKASbKTwpYPrWYqisoQq",
+      "name": "赵员工",
+      "role": "user",
+      "department": "市场部",
+      "phone": "13800138006",
+      "email": "user1@company.com",
+      "isActive": true,
+      "id": 7,
+      "createdAt": "2026-06-09T19:01:07.102Z",
+      "updatedAt": "2026-06-09T19:01:07.102Z"
+    },
+    {
+      "username": "user2",
+      "password": "$2a$10$rUeZco3sVo4MxSF3HroldepgS3zBelUU2zN64GdUDul3hvNWF9Z8C",
+      "name": "孙员工",
+      "role": "user",
+      "department": "财务部",
+      "phone": "13800138007",
+      "email": "user2@company.com",
+      "isActive": true,
+      "id": 8,
+      "createdAt": "2026-06-09T19:01:07.200Z",
+      "updatedAt": "2026-06-09T19:01:07.200Z"
+    }
+  ],
+  "nextId": 9
+}
